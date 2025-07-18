@@ -1,45 +1,73 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  TableSortLabel,
-  Pagination,
-  TextField,
-  Paper,
+  Table, TableHead, TableBody, TableRow, TableCell,
+  TableSortLabel, Button, TextField, Paper,
 } from '@mui/material';
-import { useSearchRepositoriesQuery } from '../api/githubApi'; // RTK Query хук, который ты написал
+import { useSearchRepositoriesQuery } from '../api/githubApi';
+import styles from './RepoSearch.module.scss';
 
-interface SortState {
+export interface SortState {
   field: 'STARS' | 'FORKS' | 'UPDATED_AT';
   direction: 'ASC' | 'DESC';
 }
 
+/**
+ * Компонент поиска репозиториев GitHub и отображения их в виде таблицы.
+ */
 export const RepoSearch: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [page, setPage] = useState(1);
+  const [debouncedTerm, setDebouncedTerm] = useState(searchTerm);
   const [sort, setSort] = useState<SortState>({ field: 'STARS', direction: 'DESC' });
+  const [afterCursor, setAfterCursor] = useState<string | null>(null);
+  const [beforeCursor, setBeforeCursor] = useState<string | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<any | null>(null);
 
-  // Запрос через RTK Query
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedTerm(searchTerm), 500);
+    return () => clearTimeout(timeout);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    setAfterCursor(null);
+    setBeforeCursor(null);
+  }, [debouncedTerm, sort]);
+
+  const isGoingForward = afterCursor !== null;
+
   const { data, error, isLoading } = useSearchRepositoriesQuery({
-    search: searchTerm || 'react', // По умолчанию react, чтобы сразу что-то видеть
-    first: 10,
-    after: null, // Для упрощения пока без курсоров пагинации
+    search: debouncedTerm || 'react',
+    first: isGoingForward ? 10 : undefined,
+    after: isGoingForward ? afterCursor ?? undefined : undefined,
+    last: !isGoingForward && beforeCursor ? 10 : undefined,
+    before: !isGoingForward ? beforeCursor ?? undefined : undefined,
     orderBy: { field: sort.field, direction: sort.direction },
   });
 
-  // Обработчик сортировки
   const handleSort = (field: SortState['field']) => {
     setSort((prev) => ({
       field,
       direction: prev.direction === 'ASC' ? 'DESC' : 'ASC',
     }));
+    setAfterCursor(null);
+    setBeforeCursor(null);
+  };
+
+  const handleNextPage = () => {
+    if (data?.search?.pageInfo?.endCursor) {
+      setAfterCursor(data.search.pageInfo.endCursor);
+      setBeforeCursor(null);
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (data?.search?.pageInfo?.startCursor) {
+      setBeforeCursor(data.search.pageInfo.startCursor);
+      setAfterCursor(null);
+    }
   };
 
   return (
-    <Paper style={{ padding: 16 }}>
+    <Paper className={styles.container}>
       <TextField
         fullWidth
         label="Поиск репозиториев GitHub"
@@ -52,35 +80,35 @@ export const RepoSearch: React.FC = () => {
       {isLoading && <p>Загрузка...</p>}
       {error && <p>Ошибка загрузки данных</p>}
 
-      {data && (
+      {data && data.search && data.search.edges?.length > 0 ? (
         <>
           <Table>
             <TableHead>
               <TableRow>
                 <TableCell>Название</TableCell>
                 <TableCell>Язык</TableCell>
-                <TableCell sortDirection={sort.field === 'FORKS' ? sort.direction.toLowerCase() : false}>
+                <TableCell>
                   <TableSortLabel
                     active={sort.field === 'FORKS'}
-                    direction={sort.direction.toLowerCase()}
+                    direction={sort.direction.toLowerCase() as 'asc' | 'desc'}
                     onClick={() => handleSort('FORKS')}
                   >
                     Форки
                   </TableSortLabel>
                 </TableCell>
-                <TableCell sortDirection={sort.field === 'STARS' ? sort.direction.toLowerCase() : false}>
+                <TableCell>
                   <TableSortLabel
                     active={sort.field === 'STARS'}
-                    direction={sort.direction.toLowerCase()}
+                    direction={sort.direction.toLowerCase() as 'asc' | 'desc'}
                     onClick={() => handleSort('STARS')}
                   >
                     Звёзды
                   </TableSortLabel>
                 </TableCell>
-                <TableCell sortDirection={sort.field === 'UPDATED_AT' ? sort.direction.toLowerCase() : false}>
+                <TableCell>
                   <TableSortLabel
                     active={sort.field === 'UPDATED_AT'}
-                    direction={sort.direction.toLowerCase()}
+                    direction={sort.direction.toLowerCase() as 'asc' | 'desc'}
                     onClick={() => handleSort('UPDATED_AT')}
                   >
                     Обновлено
@@ -89,8 +117,8 @@ export const RepoSearch: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {data.search.edges.map(({ node }) => (
-                <TableRow key={node.id} hover>
+              {data.search.edges.map(({ node }: { node: any }) => (
+                <TableRow key={node.id} hover onClick={() => setSelectedRepo(node)}>
                   <TableCell>{node.name}</TableCell>
                   <TableCell>{node.primaryLanguage?.name || '-'}</TableCell>
                   <TableCell>{node.forkCount}</TableCell>
@@ -101,13 +129,34 @@ export const RepoSearch: React.FC = () => {
             </TableBody>
           </Table>
 
-          <Pagination
-            count={Math.ceil(data.search.repositoryCount / 10)}
-            page={page}
-            onChange={(e, newPage) => setPage(newPage)}
-            style={{ marginTop: 16 }}
-          />
+          <div className={styles.pagination}>
+            <Button
+              variant="contained"
+              onClick={handlePrevPage}
+              disabled={!data.search.pageInfo?.hasPreviousPage}
+            >
+              Назад
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleNextPage}
+              disabled={!data.search.pageInfo?.hasNextPage}
+            >
+              Вперед
+            </Button>
+          </div>
+
+          {selectedRepo && (
+            <Paper className={styles.details}>
+              <h3>Детали репозитория</h3>
+              <p><strong>Название:</strong> {selectedRepo.name}</p>
+              <p><strong>Описание:</strong> {selectedRepo.description || '—'}</p>
+              <p><strong>Лицензия:</strong> {selectedRepo.licenseInfo?.name || '—'}</p>
+            </Paper>
+          )}
         </>
+      ) : (
+        !isLoading && <p>Нет данных для отображения</p>
       )}
     </Paper>
   );

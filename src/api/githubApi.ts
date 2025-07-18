@@ -1,91 +1,87 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 
-const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql';
-const token = process.env.REACT_APP_GITHUB_TOKEN;
+interface SearchRepositoriesArgs {
+  search: string;
+  first?: number;
+  after?: string | null;
+  last?: number;
+  before?: string | null;
+  orderBy?: {
+    field: 'STARS' | 'FORKS' | 'UPDATED_AT';
+    direction: 'ASC' | 'DESC';
+  };
+}
 
-/**
- * Формирует GraphQL-запрос для поиска репозиториев
- *
- * @param search Поисковый запрос
- * @param after Курсор для пагинации
- * @param first Количество репозиториев на странице
- * @param orderBy Объект сортировки
- * @returns Строка запроса GraphQL
- */
-const buildGraphQLQuery = (
-    search: string,
-    after: string | null,
-    first: number,
-    orderBy: { field: string; direction: 'ASC' | 'DESC' }
-): string => `
-  query {
-    search(
-      query: "${search}",
-      type: REPOSITORY,
-      first: ${first},
-      ${after ? `after: "${after}",` : ''}
-      orderBy: {field: ${orderBy.field}, direction: ${orderBy.direction}}
-    ) {
-      repositoryCount
-      pageInfo {
-        endCursor
-        hasNextPage
-      }
-      edges {
-        cursor
-        node {
-          ... on Repository {
-            id
-            name
-            description
-            licenseInfo {
-              name
-            }
-            forkCount
-            stargazerCount
-            primaryLanguage {
-              name
-            }
-            updatedAt
-            url
-          }
-        }
-      }
-    }
-  }
-`;
-
-/**
- * RTK Query API для работы с GitHub GraphQL API
- */
 export const githubApi = createApi({
-    reducerPath: 'githubApi',
-    baseQuery: fetchBaseQuery({
-        baseUrl: GITHUB_GRAPHQL_URL,
-        prepareHeaders: (headers) => {
-            if (token) {
-                headers.set('Authorization', `Bearer ${token}`);
+  reducerPath: 'githubApi',
+  baseQuery: fetchBaseQuery({
+    baseUrl: 'https://api.github.com/graphql',
+    prepareHeaders: (headers) => {
+      // Убедись, что у тебя в .env прописан REACT_APP_GITHUB_TOKEN с твоим токеном
+      headers.set('Authorization', `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`);
+      return headers;
+    },
+  }),
+  endpoints: (builder) => ({
+    searchRepositories: builder.query<any, SearchRepositoriesArgs>({
+      query: ({ search, first, after, last, before, orderBy }) => ({
+        url: '',
+        method: 'POST',
+        body: {
+          query: `
+            query SearchRepos(
+              $search: String!,
+              $first: Int,
+              $after: String,
+              $last: Int,
+              $before: String,
+              $orderBy: RepositoryOrder
+            ) {
+              search(
+                query: $search,
+                type: REPOSITORY,
+                first: $first,
+                after: $after,
+                last: $last,
+                before: $before,
+                orderBy: $orderBy
+              ) {
+                repositoryCount
+                edges {
+                  node {
+                    ... on Repository {
+                      id
+                      name
+                      forkCount
+                      stargazerCount
+                      updatedAt
+                      primaryLanguage {
+                        name
+                      }
+                    }
+                  }
+                }
+                pageInfo {
+                  endCursor
+                  startCursor
+                  hasNextPage
+                  hasPreviousPage
+                }
+              }
             }
-            headers.set('Content-Type', 'application/json');
-            return headers;
-        }
+          `,
+          variables: {
+            search,
+            first,
+            after,
+            last,
+            before,
+            orderBy,
+          },
+        },
+      }),
     }),
-    endpoints: (builder) => ({
-        searchRepositories: builder.query<any, {
-            search: string;
-            after?: string | null;
-            first?: number;
-            orderBy?: { field: string; direction: 'ASC' | 'DESC' };
-        }>({
-            query: ({ search, after = null, first = 10, orderBy = { field: 'STARS', direction: 'DESC' } }) => ({
-                url: '', // важно!
-                method: 'POST',
-                body: {
-                    query: buildGraphQLQuery(search, after, first, orderBy),
-                },
-            }),
-        }),
-    }),
+  }),
 });
 
 export const { useSearchRepositoriesQuery } = githubApi;
