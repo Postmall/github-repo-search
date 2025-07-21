@@ -3,13 +3,10 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 interface SearchRepositoriesArgs {
   search: string;
   first?: number;
-  after?: string | null;
+  after?: string;
   last?: number;
-  before?: string | null;
-  orderBy?: {
-    field: 'STARS' | 'FORKS' | 'UPDATED_AT';
-    direction: 'ASC' | 'DESC';
-  };
+  before?: string;
+  // Убрали orderBy из интерфейса, т.к. он не поддерживается в search
 }
 
 export const githubApi = createApi({
@@ -17,69 +14,78 @@ export const githubApi = createApi({
   baseQuery: fetchBaseQuery({
     baseUrl: 'https://api.github.com/graphql',
     prepareHeaders: (headers) => {
-      // Убедись, что у тебя в .env прописан REACT_APP_GITHUB_TOKEN с твоим токеном
-      headers.set('Authorization', `Bearer ${process.env.REACT_APP_GITHUB_TOKEN}`);
+      const token = process.env.REACT_APP_GITHUB_TOKEN;
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+      headers.set('Content-Type', 'application/json');
       return headers;
     },
   }),
   endpoints: (builder) => ({
     searchRepositories: builder.query<any, SearchRepositoriesArgs>({
-      query: ({ search, first, after, last, before, orderBy }) => ({
-        url: '',
-        method: 'POST',
-        body: {
-          query: `
-            query SearchRepos(
-              $search: String!,
-              $first: Int,
-              $after: String,
-              $last: Int,
-              $before: String,
-              $orderBy: RepositoryOrder
-            ) {
-              search(
-                query: $search,
-                type: REPOSITORY,
-                first: $first,
-                after: $after,
-                last: $last,
-                before: $before,
-                orderBy: $orderBy
-              ) {
-                repositoryCount
-                edges {
-                  node {
-                    ... on Repository {
-                      id
-                      name
-                      forkCount
-                      stargazerCount
-                      updatedAt
-                      primaryLanguage {
-                        name
-                      }
-                    }
+      query: ({ search, first, after, last, before }) => {
+        const searchWithSort = search;
+
+        return {
+          url: '',
+          method: 'POST',
+          body: JSON.stringify({
+            query: `
+        query SearchRepos(
+          $search: String!,
+          $first: Int,
+          $after: String,
+          $last: Int,
+          $before: String
+        ) {
+          search(
+            query: $search,
+            type: REPOSITORY,
+            first: $first,
+            after: $after,
+            last: $last,
+            before: $before
+          ) {
+            repositoryCount
+            edges {
+              node {
+                ... on Repository {
+                  id
+                  name
+                  description
+                  forkCount
+                  stargazerCount
+                  updatedAt
+                  licenseInfo {
+                    name
                   }
-                }
-                pageInfo {
-                  endCursor
-                  startCursor
-                  hasNextPage
-                  hasPreviousPage
+                  primaryLanguage {
+                    name
+                  }
                 }
               }
             }
-          `,
-          variables: {
-            search,
-            first,
-            after,
-            last,
-            before,
-            orderBy,
-          },
-        },
-      }),
+            pageInfo {
+              endCursor
+              startCursor
+              hasNextPage
+              hasPreviousPage
+            }
+          }
+        }
+      `,
+            variables: {
+              search: searchWithSort,
+              first,
+              after,
+              last,
+              before,
+            },
+          }),
+        };
+      },
+
     }),
   }),
 });
